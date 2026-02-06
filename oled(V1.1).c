@@ -1,353 +1,473 @@
 /******************************/
 /*  需要在CubeMX中初始化I2C     */
 /*                            */
-/*  2097692048      2026_2_5  */
-/*  V1.1   经过Ai优化的V1.0    */
+/*  2097692048      2026_2_6  */
+/*  v1.1   经TRAE优化过的版本   */
 /******************************/
 #include "i2c.h"
 #include "stm32f1xx_hal.h"
 #include "oled.h"
 #include <string.h>
 
-#define OLED_I2C_ADDR         0x78        // OLED地址
-#define OLED_TIMEOUT          100         // 减小超时时间
-#define OLED_PAGE_ADDR_MODE   0x02        // 页地址模式
-#define OLED_HEIGHT           64          // OLED高度
-#define OLED_WIDTH            128         // OLED宽度
-#define OLED_PAGE_NUM         (OLED_HEIGHT/8)  // 页数
+#define OLED_I2C_ADDR 0x78      //OLED地址
+#define OLED_TIMEOUT  500       //超时时间
 
 extern I2C_HandleTypeDef hi2c1;
-static I2C_HandleTypeDef *I2C_Dataout = &hi2c1;    // 发送的IIC
-extern const uint8_t ascii_font[128][16];          // ASCII字库
+static I2C_HandleTypeDef *I2C_Dataout = &hi2c1;            //发送的IIC
+extern const uint8_t ascii_font[128][16];                  //ASCII字库
 
-uint8_t OLED_DisplayBuf[OLED_PAGE_NUM][OLED_WIDTH];  // 显存
+uint8_t OLED_DisplayBuf[8][128];                           //显存
 
 /*
- *  函数名：OLED_Test
+ *  函数名：Oled_Test
  *  功能描述：I2C发送测试命令给OLED
+ *  输入参数：无
+ *  输出参数：无
+ *  返回值：  HAL_OK
+             HAL_ERROR
+             HAL_BUSY
+             HAL_TIMEOUT
  */
 HAL_StatusTypeDef OLED_Test(void)
 {
-    return HAL_I2C_IsDeviceReady(I2C_Dataout, OLED_I2C_ADDR, 1, OLED_TIMEOUT);
+    return HAL_I2C_IsDeviceReady(I2C_Dataout, OLED_I2C_ADDR,1,OLED_TIMEOUT);
 }
-
 /*
  *  函数名：OLED_WriteCmd
  *  功能描述：I2C发送命令给OLED
+ *  输入参数：chr->要发送的命令字符串
+ *          len->字符串长度
+ *  输出参数：无
+ *  返回值：0-成功, 其他值失败
  */
-uint8_t OLED_WriteCmd(uint8_t *cmd, uint8_t len)
+uint8_t OLED_WriteCmd(uint8_t *chr,uint8_t len)
 {
-    return HAL_I2C_Mem_Write(I2C_Dataout, OLED_I2C_ADDR, 0x00,
-                            I2C_MEMADD_SIZE_8BIT, cmd, len, OLED_TIMEOUT);
+    return HAL_I2C_Mem_Write(I2C_Dataout,OLED_I2C_ADDR,0x00,I2C_MEMADD_SIZE_8BIT,(uint8_t *) &chr[0],len,OLED_TIMEOUT);
 }
-
 /*
  *  函数名：OLED_WriteData
- *  功能描述：I2C发送数据给OLED
+ *  功能描述：I2C发送命令给OLED
+ *  输入参数：chr->要发送的数据字符串
+ *          len->字符串长度
+ *  输出参数：无
+ *  返回值：0-成功, 其他值失败
  */
-uint8_t OLED_WriteData(uint8_t *data, uint8_t len)
+uint8_t OLED_WriteData(uint8_t *chr,uint8_t len)
 {
-    return HAL_I2C_Mem_Write(I2C_Dataout, OLED_I2C_ADDR, 0x40,
-                            I2C_MEMADD_SIZE_8BIT, data, len, OLED_TIMEOUT);
+    return HAL_I2C_Mem_Write(I2C_Dataout,OLED_I2C_ADDR,0x40,I2C_MEMADD_SIZE_8BIT,(uint8_t *) &chr[0],len,OLED_TIMEOUT);
 }
-
 /*
- *  函数名：OLED_Init
+ *  函数名：Oled_Init
  *  功能描述：OLED初始化
+ *  输入参数：无
+ *  输出参数：无
+ *  返回值：无
  */
 void OLED_Init(void)
 {
     HAL_Delay(100);
-
-    // 初始化命令序列
-    static const uint8_t init_cmds[] = {
-        0xAE,                   // 关闭显示
+    // 参考代码的页地址模式初始化
+    uint8_t init_cmds[] = {
+        0xAE,       // 关闭显示
 
         // 时钟和显示设置
-        0xD5, 0x80,            // 设置显示时钟分频比/振荡器频率
-        0xA8, 0x3F,            // 设置多路复用率 (64-1)
-        0xD3, 0x00,            // 设置显示偏移
-        0x40,                  // 设置显示起始行
+        0xD5, 0x80,  // 设置显示时钟分频比/振荡器频率
+        0xA8, 0x3F,  // 设置多路复用率 (64-1=63=0x3F)
+        0xD3, 0x00,  // 设置显示偏移
+        0x40,        // 设置显示起始行
 
         // 地址模式：页地址模式
-        0x20, OLED_PAGE_ADDR_MODE,  // 页地址模式
+        0x20, 0x02,  // ← 关键！改为页地址模式
 
         // 显示方向
-        0xA1,                  // 设置段重映射 - 水平翻转
-        0xC8,                  // 设置COM扫描方向 - 垂直翻转
+        0xA1,        // 设置段重映射 - 水平翻转
+        0xC8,        // 设置COM扫描方向 - 垂直翻转
 
         // 硬件配置
-        0xDA, 0x12,            // 设置COM硬件引脚配置
-        0x81, 0xCF,            // 设置对比度控制
+        0xDA, 0x12,  // 设置COM硬件引脚配置
+        0x81, 0xCF,  // 设置对比度控制
 
         // 时序设置
-        0xD9, 0xF1,            // 设置预充电周期
-        0xDB, 0x30,            // 设置VCOMH取消选择电平
+        0xD9, 0xF1,  // 设置预充电周期
+        0xDB, 0x30,  // 设置VCOMH取消选择电平
 
         // 显示控制
-        0xA4,                  // 关闭整体显示
-        0xA6,                  // 设置正常显示模式
+        0xA4,        // 关闭整体显示
+        0xA6,        // 设置正常显示模式
 
-        // 电荷泵设置
-        0x8D, 0x14,            // 使能电荷泵
+        // 电荷泵设置（关键）
+        0x8D, 0x14,  // 使能电荷泵
 
-        // 重新配置COM引脚
+        // 重新配置COM引脚（电荷泵使能后）
         0xDA, 0x12,
 
         // 开启显示
         0xAF,
     };
 
-    OLED_WriteCmd((uint8_t *)init_cmds, sizeof(init_cmds));
+    OLED_WriteCmd(init_cmds, sizeof(init_cmds));
     HAL_Delay(100);
     OLED_Clear();
 }
-
 /*
  *  函数名：OLED_SetCursor
- *  功能描述：OLED设置光标位置
+ *  功能描述：OLED输出光标位置
+ *  输入参数：x->光标横向位置(0 ~ 128)
+ *           y->光标横向位置(0 ~ 8)
+ *  输出参数：无
+ *  返回值：无
  */
-void OLED_SetCursor(uint8_t x, uint8_t page)
+void OLED_SetCursor(uint8_t x, uint8_t Page)
 {
-    // 限制参数范围
-    x = x & 0x7F;
-    page = page & 0x07;
+    // 按照正确的顺序：先设置页，再设置列
+    // 页地址命令：0xB0 + Page (0~7)
+    HAL_I2C_Mem_Write(I2C_Dataout, OLED_I2C_ADDR, 0x00,
+                     I2C_MEMADD_SIZE_8BIT, (uint8_t[]){0xB0 | (Page & 0x07)}, 1, 100);
 
-    // 一次性发送所有设置命令
-    uint8_t cursor_cmds[] = {
-        0xB0 | page,           // 设置页地址
-        0x00 | (x & 0x0F),     // 设置列地址低4位
-        0x10 | ((x >> 4) & 0x0F) // 设置列地址高4位
-    };
+    // 列地址低4位：0x00 + (x & 0x0F)
+    HAL_I2C_Mem_Write(I2C_Dataout, OLED_I2C_ADDR, 0x00,
+                     I2C_MEMADD_SIZE_8BIT, (uint8_t[]){0x00 | (x & 0x0F)}, 1, 100);
 
-    OLED_WriteCmd(cursor_cmds, sizeof(cursor_cmds));
+    // 列地址高4位：0x10 + ((x >> 4) & 0x0F)
+    HAL_I2C_Mem_Write(I2C_Dataout, OLED_I2C_ADDR, 0x00,
+                     I2C_MEMADD_SIZE_8BIT, (uint8_t[]){0x10 | ((x >> 4) & 0x0F)}, 1, 100);
 }
-
 /*
  *  函数名：OLED_Clear
  *  功能描述：OLED清屏
+ *  输入参数：无
+ *  输出参数：无
+ *  返回值：无
  */
 void OLED_Clear(void)
 {
-    memset(OLED_DisplayBuf, 0x00, sizeof(OLED_DisplayBuf));
-    OLED_UpData();
+    for (uint8_t j = 0; j < 8; j++)
+    {
+        OLED_SetCursor(0,j);
+        for (uint8_t i = 0; i < 128; i++)
+        {
+            OLED_DisplayBuf[j][i] = 0x00;
+        }
+    }
+    HAL_Delay(100);
 }
-
 /*
  *  函数名：OLED_ClearArea
  *  功能描述：OLED区域清屏
+ *  输入参数： x-> 清屏开始x轴
+ *            y-> 清屏开始y轴
+ *            width->清屏宽度
+ *            Height->清屏高度
+ *  输出参数：无
+ *  返回值：无
  */
-void OLED_ClearArea(uint8_t x, uint8_t y, uint8_t width, uint8_t height)
+void OLED_ClearArea(uint8_t x, uint8_t y, uint8_t width,uint8_t Height)
 {
-    // 参数检查
-    if (x >= OLED_WIDTH || y >= OLED_HEIGHT) return;
-
-    uint8_t end_x = (x + width) > OLED_WIDTH ? OLED_WIDTH : (x + width);
-    uint8_t end_y = (y + height) > OLED_HEIGHT ? OLED_HEIGHT : (y + height);
-
-    for (uint8_t py = y; py < end_y; py++) {
-        for (uint8_t px = x; px < end_x; px++) {
-            OLED_DisplayBuf[py / 8][px] &= ~(1 << (py % 8));
+    for (uint8_t j = y; j < y + Height; j++)
+    {
+        for (uint8_t i = x; i < x + width; i++)
+        {
+            OLED_DisplayBuf[j / 8][i] &= ~(0x01 << (j % 8));
         }
+
     }
 }
-
 /*
  *  函数名：OLED_ShowChar
  *  功能描述：OLED显示字符
+ *  输入参数： x-> 光标x轴（0 ~ 15）
+ *            y-> 光标y轴（0 ~ 7）
+ *            chr-> 显示的字符
+ *  输出参数：无
+ *  返回值：无
  */
 void OLED_ShowChar(uint8_t x, uint8_t y, uint8_t chr)
 {
-    if (chr < 32 || chr > 127) chr = ' ';  // 非法字符处理
-    OLED_ShowImage(x * 8, y * 16, 8, 16, (uint8_t *)ascii_font[chr]);
+    OLED_ShowImage(x * 8,y * 16,8,16,(uint8_t *)ascii_font[chr]);
 }
-
 /*
  *  函数名：OLED_ShowString
  *  功能描述：OLED显示字符串
+ *  输入参数： x-> 光标x轴（0 ~ 15）
+ *            y-> 光标y轴（0 ~ 7）
+ *            chr-> 显示的字符串
+ *  输出参数：无
+ *  返回值：无
  */
-void OLED_ShowString(uint8_t x, uint8_t y, const char *str)
+void OLED_ShowString(uint8_t x, uint8_t y, uint8_t *chr)
 {
-    while (*str) {
-        OLED_ShowChar(x++, y, *str++);
-        if (x >= OLED_WIDTH/8) break;  // 防止越界
+    for (uint8_t i = 0; chr[i] != '\0'; i++)
+    {
+        OLED_ShowChar(x + i, y, chr[i]);
     }
 }
-
-/*
- *  函数名：OLED_Numexponent
- *  功能描述：求次方数
- */
-static uint32_t OLED_Numexponent(uint8_t base, uint8_t frequency)
-{
-    uint32_t result = 1;
-    while (frequency--) {
-        result *= base;
-    }
-    return result;
-}
-
 /*
  *  函数名：OLED_ShowNum
  *  功能描述：OLED显示数字(10进制)
+ *  输入参数： x-> 光标x轴（0 ~ 15）
+ *            y-> 光标y轴（0 ~ 7）
+ *            Number-> 显示的数字
+ *            Length-> 显示的数字长度
+ *  输出参数：无
+ *  返回值：无
  */
-void OLED_ShowNum(uint8_t x, uint8_t y, uint32_t number, uint8_t length)
+void OLED_ShowNum(uint8_t x, uint8_t y, uint32_t Number, uint8_t Length)
 {
-    for (uint8_t i = 0; i < length; i++) {
-        uint8_t digit = (number / OLED_Numexponent(10, length - i - 1)) % 10;
-        OLED_ShowChar(x + i, y, digit + '0');
+    for (uint8_t i = 0; i < Length; i++)
+    {
+        OLED_ShowChar(x + Length - i - 1, y, Number / OLED_Numexponent(10,i) % 10 + '0');
     }
 }
-
 /*
  *  函数名：OLED_ShowHexNum
  *  功能描述：OLED显示数字(16进制)
+ *  输入参数： x-> 光标x轴（0 ~ 15）
+ *            y-> 光标y轴（0 ~ 7）
+ *            Number-> 显示的数字
+ *            Length-> 显示的数字长度
+ *            mode-> 显示0x前缀（0 or 1）
+ *  输出参数：无
+ *  返回值：无
  */
-void OLED_ShowHexNum(uint8_t x, uint8_t y, uint32_t number, uint8_t length, uint8_t show_prefix)
+void OLED_ShowHexNum(uint8_t x, uint8_t y, uint32_t Number, uint8_t Length, uint8_t mode)
 {
-    if (show_prefix == 'y') {
-        OLED_ShowString(x, y, "0x");
-        x += 2;
+    uint8_t Num, Placeholder = 0;
+    if ( mode == 'y')
+    {
+        Placeholder = 2 ;
+        OLED_ShowString(x,y,"0x");
     }
-
-    for (uint8_t i = 0; i < length; i++) {
-        uint8_t digit = (number / OLED_Numexponent(16, length - i - 1)) % 16;
-        char ch = (digit < 10) ? (digit + '0') : (digit - 10 + 'A');
-        OLED_ShowChar(x + i, y, ch);
+    for (uint8_t i = 0; i < Length; i++)
+    {
+        Num = Number / OLED_Numexponent(16,i) % 16;
+        if (Num < 10)
+        {
+            OLED_ShowChar(x + Length - i - 1 + Placeholder, y, Num + '0');
+        }
+        else
+        {
+            OLED_ShowChar(x + Length - i - 1 + Placeholder, y, Num + 'A');
+        }
     }
 }
-
 /*
  *  函数名：OLED_ShowSignedNum
- *  功能描述：OLED显示有符号数字
+ *  功能描述：OLED显示数字(10进制)
+ *  输入参数： x-> 光标x轴（0 ~ 15）
+ *            y-> 光标y轴（0 ~ 7）
+ *            Number-> 显示的数字
+ *            Length-> 显示的数字长度
+ *  输出参数：无
+ *  返回值：无
  */
-void OLED_ShowSignedNum(uint8_t x, uint8_t y, int32_t number, uint8_t length)
+void OLED_ShowSignedNum(uint8_t x, uint8_t y, int32_t Number, uint8_t Length)
 {
-    if (number < 0) {
-        OLED_ShowChar(x, y, '-');
-        number = -number;
-    } else {
+    uint8_t i;
+    if (Number >= 0)
+    {
         OLED_ShowChar(x, y, '+');
     }
-
-    for (uint8_t i = 0; i < length; i++) {
-        uint8_t digit = (number / OLED_Numexponent(10, length - i - 1)) % 10;
-        OLED_ShowChar(x + 1 + i, y, digit + '0');
+    else
+    {
+        OLED_ShowChar(x, y, '-');
+        Number = -Number;
+    }
+    for (i = 0; i < Length; i++)
+    {
+        OLED_ShowChar(x + Length - i , y, Number / OLED_Numexponent(10,i) % 10 + '0');
     }
 }
 
 /*
  *  函数名：OLED_ShowfloatNum
  *  功能描述：OLED显示浮点数
+ *  输入参数： x-> 光标x轴（0 ~ 15）
+ *            y-> 光标y轴（0 ~ 7）
+ *            number-> 显示的浮点数
+ *            intLength-> 显示的整数部分长度
+ *            floatLength-> 显示的小数部分长度
+ *  输出参数：无
+ *  返回值：无
  */
-/*
- *  函数名：OLED_ShowfloatNum
- *  功能描述：OLED显示浮点数（直接操作显存，提高效率）
- */
-void OLED_ShowfloatNum(uint8_t x, uint8_t y, float number, uint8_t int_len, uint8_t frac_len)
+void OLED_ShowfloatNum(uint8_t x, uint8_t y, float number, uint8_t intLength, uint8_t floatLength)
 {
-    uint8_t start_x = x;
-
-    // 符号位
-    if (number < 0) {
-        OLED_ShowChar(x, y, '-');
-        number = -number;
-    } else {
+    // 处理符号
+    if (number >= 0)
+    {
         OLED_ShowChar(x, y, '+');
     }
-    x++;
-
-    // 整数部分
-    uint32_t int_part = (uint32_t)number;
-    for (uint8_t i = 0; i < int_len; i++) {
-        uint8_t digit = (int_part / OLED_Numexponent(10, int_len - i - 1)) % 10;
-        OLED_ShowChar(x + i, y, digit + '0');
+    else
+    {
+        OLED_ShowChar(x, y, '-');
+        number = -number;
     }
-    x += int_len;
 
-    // 小数点
-    OLED_ShowChar(x, y, '.');
-    x++;
+    // 限制浮点数范围，防止溢出
+    if (number > 999999999.999999f)
+    {
+        OLED_ShowString(x + 1, y, "OVERFLOW");
+        return;
+    }
 
-    // 小数部分
+    // 显示整数部分
+    uint32_t int_part = (uint32_t)number;
+    for (uint8_t i = 0; i < intLength; i++)
+    {
+        uint8_t digit = (int_part / OLED_Numexponent(10, i)) % 10;
+        OLED_ShowChar(x + intLength - i, y, digit + '0');
+    }
+
+    // 显示小数点
+    OLED_ShowChar(x + intLength + 1, y, '.');
+
+    // 显示小数部分
     float frac_part = number - int_part;
-    for (uint8_t i = 0; i < frac_len; i++) {
+    for (uint8_t i = 0; i < floatLength; i++)
+    {
         frac_part *= 10;
-        uint8_t digit = ((uint32_t)frac_part % 10);
-        OLED_ShowChar(x + i, y, digit + '0');
+        uint8_t digit = (uint8_t)frac_part;
+        OLED_ShowChar(x + intLength + i + 2, y, digit + '0');
+        frac_part -= digit;
+    }
+}
+
+
+/*
+ *  函数名：OLED_Numexponent
+ *  功能描述：求次方数（优化版）
+ *  输入参数： base-> 底数
+ *          frequency-> 次数
+ *  输出参数：无
+ *  返回值：计算结果
+ */
+uint32_t OLED_Numexponent(uint8_t base, uint8_t frequency)
+{
+    // 对于 OLED 显示中常用的基数（10和16），使用查表法提高效率
+    if (base == 10) {
+        // 10的0~9次方查找表（最大支持10^9，未超过uint32_t范围）
+        static const uint32_t pow10_table[] = {
+            1,           // 10^0
+            10,          // 10^1
+            100,         // 10^2
+            1000,        // 10^3
+            10000,       // 10^4
+            100000,      // 10^5
+            1000000,     // 10^6
+            10000000,    // 10^7
+            100000000,   // 10^8
+            1000000000   // 10^9
+        };
+
+        return (frequency < sizeof(pow10_table)/sizeof(pow10_table[0])) ?
+               pow10_table[frequency] : 0;
+    }
+    else if (base == 16) {
+        // 16的0~8次方查找表（最大支持16^8=4294967296，超过uint32_t范围）
+        static const uint32_t pow16_table[] = {
+            1,            // 16^0
+            16,           // 16^1
+            256,          // 16^2
+            4096,         // 16^3
+            65536,        // 16^4
+            1048576,      // 16^5
+            16777216,     // 16^6
+            268435456,    // 16^7
+            4294967295    // 16^8 (实际是4294967296，但uint32_t最大值是4294967295)
+        };
+
+        return (frequency < sizeof(pow16_table)/sizeof(pow16_table[0])) ?
+               pow16_table[frequency] : 4294967295;
+    }
+    else {
+        // 对于其他基数，使用循环计算
+        uint32_t result = 1;
+        for (uint8_t i = 0; i < frequency; i++)
+        {
+            result *= base;
+        }
+        return result;
     }
 }
 
 /*
  *  函数名：OLED_UpData
  *  功能描述：OLED更新显存
+ *  输入参数：无
+ *  输出参数：无
+ *  返回值：无
  */
 void OLED_UpData(void)
 {
-    for (uint8_t page = 0; page < OLED_PAGE_NUM; page++) {
-        OLED_SetCursor(0, page);
-        OLED_WriteData(OLED_DisplayBuf[page], OLED_WIDTH);
-    }
-}
+   for (uint8_t j = 0; j < 8; j ++)
+   {
+       OLED_SetCursor(0,j);
+       OLED_WriteData((uint8_t *) &OLED_DisplayBuf[j],128);
+   }
 
+}
 /*
  *  函数名：OLED_ShowImage
- *  功能描述：OLED显示图像
+ *  功能描述：OLED显示图形
+ *  输入参数： x-> 光标x轴(0 ~ 127)
+ *            y-> 光标y轴(0 ~ 63)
+ *            width-> 显示的宽度
+ *            Height-> 显示的高度
+ *            buff-> 显示的图像字符串
+ *  输出参数：无
+ *  返回值：无
  */
-void OLED_ShowImage(uint8_t x, uint8_t y, uint8_t width, uint8_t height, uint8_t *buff)
+void OLED_ShowImage(uint8_t x, uint8_t y, uint8_t width,uint8_t Height,uint8_t *buff)
 {
-    // 参数检查
-    if (x >= OLED_WIDTH || y >= OLED_HEIGHT) return;
+    if (x < 127 && y < 64)
+    {
+        OLED_ClearArea(x,y,width,Height);
 
-    uint8_t end_x = (x + width) > OLED_WIDTH ? OLED_WIDTH : (x + width);
-    uint8_t end_y = (y + height) > OLED_HEIGHT ? OLED_HEIGHT : (y + height);
-
-    // 清理区域
-    OLED_ClearArea(x, y, width, height);
-
-    // 显示图像
-    for (uint8_t py = y; py < end_y; py++) {
-        uint8_t page = py / 8;
-        uint8_t bit_pos = py % 8;
-
-        for (uint8_t px = x; px < end_x; px++) {
-            uint16_t buf_idx = ((py - y) / 8) * width + (px - x);
-            if (buf_idx < (height + 7)/8 * width) {
-                uint8_t data_byte = buff[buf_idx];
-
-                // 设置对应位
-                if (data_byte & (1 << ((py - y) % 8))) {
-                    OLED_DisplayBuf[page][px] |= (1 << bit_pos);
-                }
+        for (uint8_t j = 0; j < (Height - 1) / 8 + 1; j++)
+        {
+            for (uint8_t i = 0; i < width; i++)
+            {
+                OLED_DisplayBuf[y / 8 + j][x + i] |= buff[j * width + i] << (y % 8);
+                OLED_DisplayBuf[y / 8 + j + 1 ][x + i] |= buff[j * width + i] >> (8 - y % 8);
             }
         }
     }
 }
-
 /*
  *  函数名：OLED_DrawPoint
- *  功能描述：OLED绘制像素点
+ *  功能描述：OLED显示像素点
+*  输入参数： x-> 光标x轴(0 ~ 127)
+ *            y-> 光标y轴(0 ~ 63)
+ *  输出参数：无
+ *  返回值：无
  */
 void OLED_DrawPoint(uint8_t x, uint8_t y)
 {
-    if (x < OLED_WIDTH && y < OLED_HEIGHT) {
-        OLED_DisplayBuf[y / 8][x] |= (1 << (y % 8));
+    if (x < 128 && y < 64)
+    {
+        OLED_DisplayBuf[y / 8][x] |= 0x01 << (y % 8);
     }
-}
 
+}
 /*
- *  函数名：OLED_GetPoint
- *  功能描述：OLED读取像素点
+ *  函数名：OLED_DrawPoint
+ *  功能描述：OLED像素点读取
+*  输入参数： x-> 光标x轴(0 ~ 127)
+ *            y-> 光标y轴(0 ~ 63)
+ *  输出参数：1->有像素
+ *           0->无像素
+ *  返回值：无
  */
 uint8_t OLED_GetPoint(uint8_t x, uint8_t y)
 {
-    if (x < OLED_WIDTH && y < OLED_HEIGHT) {
-        return (OLED_DisplayBuf[y / 8][x] >> (y % 8)) & 0x01;
+    if (x < 128 && y < 64)
+    {
+        if ( OLED_DisplayBuf[y / 8][x] & 0x01 << (y % 8))
+        {
+            return 1;
+        }
     }
     return 0;
 }
-
-// 字库数组保持不变...
 
 const uint8_t ascii_font[128][16] = {
 {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},/*" ",0*/
